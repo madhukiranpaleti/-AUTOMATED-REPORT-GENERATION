@@ -1,0 +1,185 @@
+!pip install fpdf
+import pandas as pd
+import numpy as np # Import numpy
+from fpdf import FPDF
+from datetime import datetime
+import os
+
+def generate_sample_data(filename="sample_sales_data.csv", num_entries=50):
+    """
+    Generates sample sales data and saves it to a CSV file.
+    """
+    data = {
+        'ProductID': [f'P{i:03d}' for i in range(1, num_entries + 1)],
+        'Category': ['Electronics'] * (num_entries // 3) +
+                    ['Apparel'] * (num_entries // 3) +
+                    ['Home Goods'] * (num_entries - 2 * (num_entries // 3)),
+        'UnitsSold': [int(x) for x in (10 + 20 * np.random.rand(num_entries))], # Corrected: pd.np to np
+        'PricePerUnit': [round(x, 2) for x in (50 + 150 * np.random.rand(num_entries))] # Corrected: pd.np to np
+    }
+    df = pd.DataFrame(data)
+    df['Revenue'] = df['UnitsSold'] * df['PricePerUnit']
+    df.to_csv(filename, index=False)
+    print(f"Sample data generated and saved to '{filename}'")
+    return filename
+
+def analyze_data(filepath):
+    """
+    Reads data from a CSV file and performs basic analysis.
+
+    Args:
+        filepath (str): Path to the CSV file.
+
+    Returns:
+        tuple: A tuple containing the DataFrame and a dictionary of analysis results.
+    """
+    try:
+        df = pd.read_csv(filepath)
+        
+        total_revenue = df['Revenue'].sum()
+        total_units_sold = df['UnitsSold'].sum()
+        avg_price_per_unit = df['PricePerUnit'].mean()
+        
+        # Analysis by category
+        category_summary = df.groupby('Category').agg(
+            TotalRevenue=('Revenue', 'sum'),
+            TotalUnitsSold=('UnitsSold', 'sum'),
+            AveragePrice=('PricePerUnit', 'mean')
+        ).reset_index()
+        
+        analysis_results = {
+            'total_revenue': total_revenue,
+            'total_units_sold': total_units_sold,
+            'avg_price_per_unit': avg_price_per_unit,
+            'category_summary': category_summary
+        }
+        return df, analysis_results
+    except FileNotFoundError:
+        print(f"Error: File not found at {filepath}")
+        return None, None
+    except Exception as e:
+        print(f"An error occurred during data analysis: {e}")
+        return None, None
+
+def generate_pdf_report(output_filename, df, analysis_results):
+    """
+    Generates a formatted PDF report using FPDF.
+
+    Args:
+        output_filename (str): Name of the output PDF file.
+        df (pd.DataFrame): The original DataFrame.
+        analysis_results (dict): Dictionary containing analysis results.
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Arial", size=12)
+
+    # --- Title Page / Header ---
+    pdf.set_font("Arial", "B", 24)
+    pdf.cell(0, 10, f"Sales Performance Report - {datetime.now().strftime('%Y-%m-%d')}", 0, 1, "C")
+    pdf.ln(10)
+
+    pdf.set_font("Arial", "I", 14)
+    pdf.cell(0, 10, "Prepared by: Automated Report Generator", 0, 1, "C")
+    pdf.cell(0, 10, f"Date: {datetime.now().strftime('%B %d, %Y')}", 0, 1, "C")
+    pdf.ln(20)
+
+    # --- Introduction ---
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Introduction:", 0, 1, "L")
+    pdf.set_font("Arial", size=12)
+    intro_text = "This report provides an overview of recent sales performance, including key metrics and a breakdown by product category. The data presented is based on the sample sales data generated for this report."
+    pdf.multi_cell(0, 10, intro_text)
+    pdf.ln(5)
+
+    # --- Executive Summary ---
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Executive Summary:", 0, 1, "L")
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 10, f"• Total Revenue: ${analysis_results['total_revenue']:.2f}", 0, 1, "L")
+    pdf.cell(0, 10, f"• Total Units Sold: {int(analysis_results['total_units_sold'])}", 0, 1, "L")
+    pdf.cell(0, 10, f"• Average Price Per Unit: ${analysis_results['avg_price_per_unit']:.2f}", 0, 1, "L")
+    pdf.ln(10)
+
+    # --- Category-wise Analysis ---
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Category-wise Performance:", 0, 1, "L")
+    pdf.ln(5)
+
+    # Table Header
+    pdf.set_font("Arial", "B", 10)
+    col_widths = [40, 40, 40, 40]
+    headers = ['Category', 'Total Revenue', 'Total Units Sold', 'Average Price']
+    for i, header in enumerate(headers):
+        pdf.cell(col_widths[i], 10, header, 1, 0, 'C')
+    pdf.ln()
+
+    # Table Rows
+    pdf.set_font("Arial", size=10)
+    for index, row in analysis_results['category_summary'].iterrows():
+        pdf.cell(col_widths[0], 10, str(row['Category']), 1, 0, 'C')
+        pdf.cell(col_widths[1], 10, f"${row['TotalRevenue']:.2f}", 1, 0, 'C')
+        pdf.cell(col_widths[2], 10, str(int(row['TotalUnitsSold'])), 1, 0, 'C')
+        pdf.cell(col_widths[3], 10, f"${row['AveragePrice']:.2f}", 1, 0, 'C')
+        pdf.ln()
+    pdf.ln(10)
+
+    # --- Raw Data Table (first 10 rows for brevity) ---
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Sample Raw Data (First 10 Entries):", 0, 1, "L")
+    pdf.ln(5)
+
+    # Table Header
+    pdf.set_font("Arial", "B", 8)
+    # Calculate column widths dynamically based on content or set fixed
+    df_head = df.head(10)
+    col_widths_raw = [pdf.get_string_width(col) + 6 for col in df_head.columns] # +6 for padding
+    total_width = sum(col_widths_raw)
+    
+    # Adjust widths to fit page if too wide
+    page_width = pdf.w - 2 * pdf.l_margin
+    if total_width > page_width:
+        scale_factor = page_width / total_width
+        col_widths_raw = [w * scale_factor for w in col_widths_raw]
+
+    for i, header in enumerate(df_head.columns):
+        pdf.cell(col_widths_raw[i], 10, str(header), 1, 0, 'C')
+    pdf.ln()
+
+    # Table Rows
+    pdf.set_font("Arial", size=8)
+    for index, row in df_head.iterrows():
+        for i, col_name in enumerate(df_head.columns):
+            pdf.cell(col_widths_raw[i], 10, str(row[col_name]), 1, 0, 'C')
+        pdf.ln()
+    pdf.ln(10)
+
+    # --- Footer ---
+    pdf.set_font("Arial", "I", 12)
+    pdf.cell(0, 10, "End of Report", 0, 1, "C")
+
+    try:
+        pdf.output(output_filename)
+        print(f"PDF report generated successfully: '{output_filename}'")
+    except Exception as e:
+        print(f"An error occurred during PDF generation: {e}")
+
+if __name__ == "__main__":
+    # --- Step 1: Generate Sample Data ---
+    csv_filename = generate_sample_data()
+
+    # --- Step 2: Analyze the Data ---
+    df_data, analysis_summary = analyze_data(csv_filename)
+
+    if df_data is not None and analysis_summary is not None:
+        # --- Step 3: Generate the PDF Report ---
+        pdf_report_filename = "Sales_Performance_Report.pdf"
+        generate_pdf_report(pdf_report_filename, df_data, analysis_summary)
+    else:
+        print("Could not proceed with report generation due to data analysis errors.")
+
+    # Optional: Clean up the generated CSV file
+    # if os.path.exists(csv_filename):
+    #     os.remove(csv_filename)
+    #     print(f"Cleaned up '{csv_filename}'")
